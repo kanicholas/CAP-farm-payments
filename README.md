@@ -31,7 +31,7 @@ folders and the 'key.csv' names need to be kept as stated above for the code to 
 ## translate_condense.py
 this code translates all of the input files scheme into a standard code accross all of our files, this is stored in the 'output' folder, it then condense according to scheme and nuts region for every year and outputs the condensed files into the 'root' folder.
 
-## error_percentages.py
+## error_list.py
 annalyses the intermediary files from 'translate_condense.py' in the 'output' folder and ouputs a list of schemes that were not matched, note that the output csv the headers need to be transposed.
 
 ## error_percentages.py
