@@ -40,11 +40,11 @@ with open("missing_money_percentages_abs.csv","w+") as f1:
         #fix loading nan values
         data["amount_EURO"] = data["amount_EURO"].fillna(0)
 
-        #make absoulte
+        #make absolute
         data_abs = data.copy()
         data_abs["amount_EURO"] = abs(data_abs["amount_EURO"])
     
-        #check that file inclueds year, if not extract year from name
+        #check that file includes year, if not extract year from name
         if "year" in data.columns:
             years = set(data["year"])
             for year in years:
