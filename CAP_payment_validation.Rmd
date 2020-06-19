@@ -1,0 +1,629 @@
+---
+title: "CAP_data_validation"
+author: "Murray Scown"
+date: "18-6-2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+#1. Introduction
+Here we compare the CAP payment data of Nicholas et al. with Eurostat "subsidies on production" for 2015 (item code 25000, table agr_r_accts) and EAFRD reported expenditure by measure for 2015 (recieved from Yves Durinck at the European Commission via email on May 14, 2020).
+
+##1.1. Setup
+
+```{r setup}
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+
+setwd("###SET")
+
+```
+
+#1.2. Import data
+
+```{r import.eurostat}
+
+es.nuts0 <- read.csv2("agr_r_accts_NUTS0_2014-2016.csv", head=T)
+es.nuts2 <- read.csv2("agr_r_accts_NUTS2_2014-2016.csv", head=T)
+
+es.nuts2$NUTS0 <- substr(es.nuts2$NUTS2, 1, 2)
+
+es.nuts0
+head(es.nuts2)
+
+#sum NUTS2 data to NUTS0
+es.nuts2.sum <- aggregate(es.nuts2$Mil_euro_2015, by=list(NUTS0=es.nuts2$NUTS0), FUN="sum")
+
+#edit years for 2014 and 2016
+cnt.2014 <- c("DK")  
+cnt.2016 <- c("BG","CZ","SE")
+es.nuts2.sum[es.nuts2.sum$NUTS0=="DK","x"] <- sum(es.nuts2[es.nuts2$NUTS0=="DK","Mil_euro_2014"], na.rm=T)
+es.nuts2.sum[es.nuts2.sum$NUTS0=="CZ","x"] <- sum(es.nuts2[es.nuts2$NUTS0=="CZ","Mil_euro_2016"], na.rm=T)
+es.nuts2.sum[es.nuts2.sum$NUTS0=="BG","x"] <- sum(es.nuts2[es.nuts2$NUTS0=="BG","Mil_euro_2016"], na.rm=T)
+es.nuts2.sum[es.nuts2.sum$NUTS0=="SE","x"] <- sum(es.nuts2[es.nuts2$NUTS0=="SE","Mil_euro_2016"], na.rm=T)
+
+names(es.nuts2.sum)[2] <- "Mil_euro"
+
+es.nuts2.sum
+
+```
+
+
+```{r import.ec}
+
+#expired measures from 2007-2013 period
+ec.pII.exp <- read.csv2("PII_EU_contribution_2007-2013_2015.csv", head=T)
+
+head(ec.pII.exp)
+
+#current measures from 2014-2020 period
+ec.pII.cur <- read.csv2("PII_EU_contribution_2014-2020_2015.csv", head=T)
+
+head(ec.pII.cur)
+
+sum(ec.pII.cur$EU_cont_14_20)+sum(ec.pII.exp$EU_cont_07_13)
+
+```
+
+
+```{r scheme.categories}
+
+scheme.codes <- read.csv2("Env-Soc-Schemes_20200518.csv", head=T)
+
+scheme.codes
+
+(PI.schemes <- scheme.codes$code[1:27])
+(PII.schemes <- scheme.codes$code[28:102])
+
+ec.codes <- read.csv2("PII_codes.csv", head=T)
+
+```
+
+
+```{r import.2014.condensed}
+
+subs.2014.raw <- read.csv("outputcondensed_2014.csv", head=T)
+
+#take DK only and translated schemes
+head(subs.2014.raw[,grep('DK', names(subs.2014.raw))])
+
+subs.2014 <- subs.2014.raw[-grep('notTranslated', subs.2014.raw$translated_scheme),c(1,grep('DK', names(subs.2014.raw)))]
+head(subs.2014)
+nrow(subs.2014)
+
+#transpose
+subs.2014.t <- as.data.frame(matrix(nrow=ncol(subs.2014)-1, ncol=nrow(subs.2014)+2))
+subs.2014.t[,1] <- names(subs.2014)[-1]
+subs.2014.t[,-c(1,ncol(subs.2014.t))] <- t(subs.2014[,-1])
+names(subs.2014.t) <- c('NUTS_ID', as.character(subs.2014$translated_scheme), 'Other')
+head(subs.2014.t)
+
+#sum other schemes
+tail(subs.2014.raw)
+
+subs.2014.t$Other <- colSums(subs.2014.raw[grep('notTranslated', subs.2014.raw$translated_scheme),grep('DK', names(subs.2014.raw))], na.rm=T)
+
+subs.2014.t
+
+#sum pillars and total
+subs.2014.t$total <- rowSums(subs.2014.t[,2:78], na.rm=T)
+subs.2014.t$PI.total <- rowSums(subs.2014.t[,names(subs.2014.t) %in% PI.schemes], na.rm=T)
+subs.2014.t$PII.total <- rowSums(subs.2014.t[,names(subs.2014.t) %in% PII.schemes], na.rm=T)
+
+#check sums
+sum(subs.2014.t$total)
+sum(subs.2014.t$PI.total) + sum(subs.2014.t$PII.total) + sum(subs.2014.t$Other)
+
+#add NUTS0 and NUTS2 columns
+subs.2014.t$NUTS0 <- substr(subs.2014.t$NUTS_ID, 1, 2)
+subs.2014.t$NUTS2 <- substr(subs.2014.t$NUTS_ID, 1, 4)
+
+```
+
+
+```{r import.2015.condensed}
+
+subs.2015.raw <- read.csv("outputcondensed_2015.csv", head=T)
+
+#take only translated schemes
+subs.2015 <- subs.2015.raw[-grep('notTranslated', subs.2015.raw$translated_scheme),]
+head(subs.2015)
+head(subs.2015)[,1:3]
+nrow(subs.2015)
+
+#transpose
+subs.2015.t <- as.data.frame(matrix(nrow=ncol(subs.2015)-1, ncol=nrow(subs.2015)+2))
+subs.2015.t[,1] <- names(subs.2015)[-1]
+subs.2015.t[,-c(1,ncol(subs.2015.t))] <- t(subs.2015[,-1])
+names(subs.2015.t) <- c('NUTS_ID', as.character(subs.2015$translated_scheme), 'Other')
+head(subs.2015.t)
+
+#need to correct German NUTS IDs with 'X.' at start and '.' at end (these come in because of some ' in csv)
+subs.2015.t[grep('X', subs.2015.t$NUTS_ID),'NUTS_ID']
+
+subs.2015.t[grep('X', subs.2015.t$NUTS_ID),'NUTS_ID'] <- substr(subs.2015.t[grep('X', subs.2015.t$NUTS_ID),'NUTS_ID'],3,7) #keep only 3rd to 7th character
+
+subs.2015.t[grep('X', subs.2015.t$NUTS_ID),'NUTS_ID'] #should be empty
+
+#LU - need to add all to LU000 (include LUNaN)
+nrow(subs.2015.t)
+subs.2015.t[subs.2015.t$NUTS_ID=='LU000',]
+subs.2015.t[subs.2015.t$NUTS_ID=='LUNaN',]
+subs.2015.t[subs.2015.t$NUTS_ID %in% c('LU000', 'LUNaN'),]
+
+subs.2015.t[subs.2015.t$NUTS_ID=='LU000',-1] <- colSums(subs.2015.t[subs.2015.t$NUTS_ID %in% c('LU000', 'LUNaN'),-1], na.rm=T)
+
+subs.2015.t <- subs.2015.t[!subs.2015.t$NUTS_ID=='LUNaN',]
+nrow(subs.2015.t) #should now be 1044
+
+#sum other schemes
+tail(subs.2015.raw)[,1:3]
+
+subs.2015.t$Other <- colSums(subs.2015.raw[grep('notTranslated', subs.2015.raw$translated_scheme),-c(1,grep('LUNaN', names(subs.2015.raw)))], na.rm=T)
+
+tail(subs.2015.t)
+
+#change ltNaN to LTNaN
+subs.2015.t[subs.2015.t$NUTS_ID == 'ltNaN','NUTS_ID'] <- 'LTNaN'
+
+head(subs.2015.t)
+tail(subs.2015.t)
+
+#sum total
+subs.2015.t$total <- rowSums(subs.2015.t[,2:102], na.rm=T)
+subs.2015.t$PI.total <- rowSums(subs.2015.t[,names(subs.2015.t) %in% PI.schemes], na.rm=T)
+subs.2015.t$PII.total <- rowSums(subs.2015.t[,names(subs.2015.t) %in% PII.schemes], na.rm=T)
+
+#check sums
+sum(subs.2015.t$total)
+sum(subs.2015.t$PI.total) + sum(subs.2015.t$PII.total) + sum(subs.2015.t$Other) + sum(subs.2015.t$National, na.rm=T)
+
+#add NUTS0 and NUTS2 columns
+subs.2015.t$NUTS0 <- substr(subs.2015.t$NUTS_ID, 1, 2)
+subs.2015.t$NUTS2 <- substr(subs.2015.t$NUTS_ID, 1, 4)
+
+#adjust GR to EL and GB to UK
+subs.2015.t[subs.2015.t$NUTS0 %in% c("GR", "EL"),c(1,106:107)]
+subs.2015.t[subs.2015.t$NUTS0 %in% c("UK", "GB"),c(1,106:107)]
+
+subs.2015.t[subs.2015.t$NUTS0 %in% "GR",106:107] <- c("EL", "ELNa")
+subs.2015.t[subs.2015.t$NUTS0 %in% "GB",106:107] <- c("UK", "UKNa")
+
+```
+
+
+```{r import.2016.condensed}
+
+subs.2016.raw <- read.csv("outputcondensed_2016.csv", head=T)
+
+#take only and translated schemes
+subs.2016 <- subs.2016.raw[-grep('notTranslated', subs.2016.raw$translated_scheme),]
+head(subs.2016)
+head(subs.2016)[,1:3]
+nrow(subs.2016)
+
+#transpose
+subs.2016.t <- as.data.frame(matrix(nrow=ncol(subs.2016)-1, ncol=nrow(subs.2016)+2))
+subs.2016.t[,1] <- names(subs.2016)[-1]
+subs.2016.t[,-c(1,ncol(subs.2016.t))] <- t(subs.2016[,-1])
+names(subs.2016.t) <- c('NUTS_ID', as.character(subs.2016$translated_scheme), 'Other')
+head(subs.2016.t)
+
+#sum other schemes
+tail(subs.2016.raw)
+
+subs.2016.t$Other <- colSums(subs.2016.raw[grep('notTranslated', subs.2016.raw$translated_scheme),-1], na.rm=T)
+
+subs.2016.t
+
+#sum pillars and total
+subs.2016.t$total <- rowSums(subs.2016.t[,-1], na.rm=T)
+subs.2016.t$PI.total <- rowSums(subs.2016.t[,names(subs.2016.t) %in% PI.schemes], na.rm=T)
+subs.2016.t$PII.total <- rowSums(subs.2016.t[,names(subs.2016.t) %in% PII.schemes], na.rm=T)
+
+#check sums
+sum(subs.2016.t$total)
+sum(subs.2016.t$PI.total) + sum(subs.2016.t$PII.total) + sum(subs.2016.t$Other)
+
+#add NUTS0 and NUTS2 columns
+subs.2016.t$NUTS0 <- substr(subs.2016.t$NUTS_ID, 1, 2)
+subs.2016.t$NUTS2 <- substr(subs.2016.t$NUTS_ID, 1, 4)
+
+```
+
+#2. Data comparison
+
+##2.1. NUTS0 totals
+Here we compare Eurostat NUTS0 and aggregated NUTS2 "subsidies on production" to Nicholas et al. country totals.
+
+```{r nuts0.merge}
+
+#aggregate Nicholas et al. data
+(subs.2014.sum <- aggregate(. ~ NUTS0, subs.2014.t[,78:82], sum))
+(subs.2015.sum <- aggregate(. ~ NUTS0, subs.2015.t[,102:106], sum))
+(subs.2016.sum <- aggregate(. ~ NUTS0, subs.2016.t[,71:75], sum))
+
+#merge Nicholas data
+subs.nuts0 <- rbind(subs.2014.sum, subs.2015.sum, subs.2016.sum)
+
+#aggregate Commission PII data
+(ec.pII.cur.sum <- aggregate(EU_cont_14_20 ~ NUTS0, ec.pII.cur, sum))
+(ec.pII.exp.sum <- aggregate(EU_cont_07_13 ~ NUTS0, ec.pII.exp, sum))
+
+#fix GR to EL
+ec.pII.exp.sum$NUTS0c <- as.character(ec.pII.exp.sum$NUTS0)
+ec.pII.exp.sum[ec.pII.exp.sum$NUTS0 %in% "GR", "NUTS0c"] <- "EL"
+names(ec.pII.exp.sum)[c(1,3)] <- c("NUTS0f", "NUTS0")
+
+sum(ec.pII.cur.sum$EU_cont_14_20) + sum(ec.pII.exp.sum$EU_cont_07_13)
+
+#merge commission PII data
+ec.nuts0 <- merge(ec.pII.cur.sum, ec.pII.exp.sum[,-1], all=T)
+
+#make billion euro column
+subs.nuts0$total_bil_euro <- subs.nuts0$total / 1e9
+subs.nuts0$PI_bil_euro <- subs.nuts0$PI.total / 1e9
+subs.nuts0$PII_bil_euro <- subs.nuts0$PII.total / 1e9
+subs.nuts0$other_bil_euro <- subs.nuts0$Other / 1e9
+
+#adjust years for Eurostat
+es.nuts0$eurostat_bil_euro <- es.nuts0$Mil_euro_2015 / 1e3
+es.nuts0[es.nuts0$NUTS0=="DK","eurostat_bil_euro"] <- es.nuts0[es.nuts0$NUTS0=="DK","Mil_euro_2014"] / 1e3
+es.nuts0[es.nuts0$NUTS0=="CZ","eurostat_bil_euro"] <- es.nuts0[es.nuts0$NUTS0=="CZ","Mil_euro_2016"] / 1e3
+es.nuts0[es.nuts0$NUTS0=="BG","eurostat_bil_euro"] <- es.nuts0[es.nuts0$NUTS0=="BG","Mil_euro_2016"] / 1e3
+es.nuts0[es.nuts0$NUTS0=="SE","eurostat_bil_euro"] <- es.nuts0[es.nuts0$NUTS0=="SE","Mil_euro_2016"] / 1e3
+
+es.nuts2.sum$eurostat2_bil_euro <- es.nuts2.sum$Mil_euro / 1e3
+
+ec.nuts0$ec_PII_bil_euro <- rowSums(ec.nuts0[,-1], na.rm=T) / 1e9
+
+#merge all
+nuts0.compare <- Reduce(function(x,y) merge(x = x, y = y, by = "NUTS0", all=T, sort=F), 
+       list(subs.nuts0[,c(1,6:9)], es.nuts0[,c(1,5)], es.nuts2.sum[,c(1,3)], ec.nuts0[,c(1,4)]))
+
+nuts0.compare
+
+#remove non-EU countries
+nonEU <- c("CH", "IS", "TR", "US", "TH")
+
+(nuts0.compare <- nuts0.compare[!nuts0.compare$NUTS0 %in% nonEU,])
+nrow(nuts0.compare)
+
+nuts0.compare$year <- "2015"
+nuts0.compare[nuts0.compare$NUTS0 %in% cnt.2014,"year"] <- 2014
+nuts0.compare[nuts0.compare$NUTS0 %in% cnt.2016,"year"] <- 2016
+
+#write.csv(nuts0.compare, "nuts0_compare_FINAL.csv")
+
+```
+
+
+```{r nuts0.totals}
+
+#raw total
+sum(sum(subs.2014.t$total, na.rm=T), sum(subs.2015.t$total, na.rm=T), sum(subs.2016.t$total, na.rm=T))
+sum(subs.nuts0$total)
+(sum(subs.nuts0$PI.total)+sum(subs.nuts0$PII.total)+sum(subs.nuts0$Other)+sum(subs.2015.t$National, na.rm=T))
+sum(subs.nuts0$PI.total)
+sum(subs.nuts0$PII.total)
+sum(subs.nuts0$Other)
+
+#total leaving EU
+sum(subs.nuts0$total) - sum(nuts0.compare$total_bil_euro, na.rm=T)*1e9
+sum(subs.nuts0$PI.total) - sum(nuts0.compare$PI_bil_euro, na.rm=T)*1e9
+sum(subs.nuts0$PII.total) - sum(nuts0.compare$PII_bil_euro, na.rm=T)*1e9
+
+#EU28 total
+sum(nuts0.compare$total_bil_euro, na.rm=T)*1e9
+sum(nuts0.compare[,3:5], na.rm=T)*1e9 + sum(subs.2015.t$National, na.rm=T)
+sum(nuts0.compare$PI_bil_euro, na.rm=T)*1e9
+sum(nuts0.compare$PII_bil_euro, na.rm=T)*1e9
+sum(nuts0.compare$other_bil_euro, na.rm=T)*1e9
+
+#eurostat
+sum(nuts0.compare$eurostat_bil_euro, na.rm=T)*1e9
+
+sum(nuts0.compare$eurostat2_bil_euro, na.rm=T)*1e9
+
+sum(nuts0.compare$ec_PII_bil_euro, na.rm=T)*1e9
+
+```
+
+
+```{r nuts0.compare}
+
+cols.3 <- c("#80cdc1", "#35978f", "#01665e")
+cols.2 <- c("#bf812d", "#dfc27d")
+
+nuts0.plot.df <- gather(nuts0.compare, source, bil_euro, total_bil_euro:ec_PII_bil_euro)
+
+#totals
+#select variables to plot
+df <- nuts0.plot.df[nuts0.plot.df$source %in% c("total_bil_euro", "PI_bil_euro", "eurostat_bil_euro"),]
+
+(p.nuts0 <- ggplot(df, aes(fill=source, y=bil_euro, x=NUTS0)) +
+  geom_bar(position="dodge", stat="identity") +
+  ylab("Billion €") +
+  xlab("Member State") +
+  scale_fill_manual(labels = c("Eurostat", "Our Pillar I", "Our total"), values = cols.3) +
+  guides(fill = guide_legend("Data")) +
+  theme_bw())
+
+#PII
+df <- nuts0.plot.df[nuts0.plot.df$source %in% c("PII_bil_euro", "ec_PII_bil_euro"),]
+
+(p.nuts0.pii <- ggplot(df, aes(fill=source, y=bil_euro, x=NUTS0)) +
+  geom_bar(position="dodge", stat="identity") +
+  ylab("Billion €") +
+  xlab("Member State") +
+  scale_fill_manual(labels = c("EC request", "Our Pillar II"), values = cols.2) +
+  guides(fill = guide_legend("Data")) +
+  theme_bw())
+
+```
+
+##2.2. NUTS2 totals
+
+```{r nuts2.merge}
+
+#aggregate Nicholas et al. data
+(subs.2014.sum <- aggregate(. ~ NUTS2, subs.2014.t[,c(78:81,83)], sum))
+(subs.2015.sum <- aggregate(. ~ NUTS2, subs.2015.t[,c(102:105,107)], sum))
+(subs.2016.sum <- aggregate(. ~ NUTS2, subs.2016.t[,c(71:74,76)], sum))
+
+#merge Nicholas data
+subs.nuts2 <- rbind(subs.2014.sum, subs.2015.sum, subs.2016.sum)
+
+#adjust years
+es.nuts2$Mil_euro <- es.nuts2$Mil_euro_2015
+es.nuts2[es.nuts2$NUTS0 %in% cnt.2014,"Mil_euro"] <- es.nuts2[es.nuts2$NUTS0 %in% cnt.2014,"Mil_euro_2014"]
+es.nuts2[es.nuts2$NUTS0 %in% cnt.2016,"Mil_euro"] <- es.nuts2[es.nuts2$NUTS0 %in% cnt.2016,"Mil_euro_2016"]
+
+#merge with Eurostat data
+head(es.nuts2)
+nrow(es.nuts2)
+nrow(subs.nuts2)
+nuts2.compare <- merge(es.nuts2, subs.nuts2, all=T)
+
+```
+
+
+```{r nuts2.compare}
+
+df.2 <- nuts2.compare
+
+df.2[is.na(df.2$NUTS0),"NUTS0"] <- substr(df.2[is.na(df.2$NUTS0),"NUTS2"], 1, 2)
+
+#remove country-level subs and non EU28 countries
+df.2 <- df.2[-c(grep("Na", df.2$NUTS2), which(df.2$NUTS0 %in% nonEU)),]
+
+df.2$log_es_euros <- log(df.2$Mil_euro*1e6+1, base=10)
+df.2$log_total <- log(df.2$total+1, base=10)
+
+df.2[df.2$Mil_euro==0,c(1,6,8)]
+df.2[is.na(df.2$Mil_euro) | is.na(df.2$total),c(1,6,8)]
+
+df.3 <- df.2[-which(is.na(df.2$Mil_euro) | is.na(df.2$total) | df.2$NUTS0=="IT"),]
+
+nrow(df.3)
+
+df.3$es.rank <- rank(df.3$Mil_euro)
+df.3$tot.rank <- rank(df.3$total)
+
+(p.nuts2.tot <- ggplot(df.3, aes(x=log_es_euros, y=log_total)) +
+  geom_point(size=1) +
+  ylab("Our total (log10 €)") +
+  xlab("Eurostat (log10 €)") +
+  geom_abline(slope = 1, intercept = 0) +
+  stat_smooth(color = grey(0.5), size = 0.7) +
+  ylim(4,9.5) + #####EXCLUDES 4 OUTLIERS FROM PLOT#####
+  xlim(4,9.5) + #####EXCLUDES 4 OUTLIERS FROM PLOT#####
+  theme_bw())
+
+(p.nuts2.rank <- ggplot(df.3, aes(x=es.rank, y=tot.rank)) +
+  geom_point(size = 1) +
+  stat_smooth(color = grey(0.5), size = 0.7) +
+  ylab("Our total rank") +
+  xlab("Eurostat rank") +
+  geom_abline(slope = 1, intercept = 0) +
+  ylim(0,155) + 
+  xlim(0,155) + 
+  theme_bw())
+
+nrow(df.3[df.3$log_es_euros > 4,])
+nrow(df.3)
+
+```
+
+##2.3. NUTS0 Pillar II measures
+
+```{r pii.compare}
+
+#aggregate Nicholas et al. data
+x <- subs.2014.t[,c(which(names(subs.2014.t) %in% "NUTS0"), which(names(subs.2014.t) %in% PII.schemes))]
+
+pii.2014.sum <- x %>% 
+  group_by(NUTS0) %>% 
+  summarise_all(sum, na.rm=T)
+
+x <- subs.2015.t[,c(which(names(subs.2015.t) %in% "NUTS0"), which(names(subs.2015.t) %in% PII.schemes))]
+
+pii.2015.sum <- x %>% 
+  group_by(NUTS0) %>% 
+  summarise_all(sum, na.rm=T)
+
+x <- subs.2016.t[,c(which(names(subs.2016.t) %in% "NUTS0"), which(names(subs.2016.t) %in% PII.schemes))]
+
+pii.2016.sum <- x %>% 
+  group_by(NUTS0) %>% 
+  summarise_all(sum, na.rm=T)
+
+#merge Nicholas data
+pii.nuts0 <- bind_rows(pii.2014.sum, pii.2015.sum, pii.2016.sum)
+#make long
+n.pii <- gather(pii.nuts0, code, euro, -1)
+
+#add codes to EC data
+ec.codes
+ec.pII.cur$code <- NA
+for(e in unique(ec.pII.cur$Measure)) {
+  ec.pII.cur[ec.pII.cur$Measure==e,"code"] <- as.character(ec.codes[ec.codes$code_14_20==e,"code"][1]) #for multiple M08
+}
+
+ec.pII.exp$code <- NA
+for(e in unique(ec.pII.exp$Measure)) {
+  ec.pII.exp[ec.pII.exp$Measure==e & !is.na(ec.pII.exp$Measure),"code"] <- as.character(ec.codes[ec.codes$code_07_13==e & !is.na(ec.codes$code_07_13),"code"])
+}
+
+ec.pII.cur$source <- "EC_request"
+ec.pII.exp$source <- "EC_request"
+
+x <- ec.pII.cur
+y <- ec.pII.exp
+names(x)[2:3] <- c("cur_measure", "euro")
+names(y)[2:3] <- c("exp_measure", "euro")
+
+ec.pII <- bind_rows(x, y)
+
+ec.pII[ec.pII$cur_measure %in% "M08","code"] <- "M08.tot"
+names(ec.pII)
+
+#merge Nicholas and EC data
+n.pii$source <- "Our_PII"
+#make unique IDs
+n.pii$id <- paste(n.pii$NUTS0, n.pii$code, sep=".")
+#fix M08
+(m08 <- ec.codes[ec.codes$code_14_20 %in% "M08","code"])
+n.pii[n.pii$code %in% m08,"id"] <- NA
+n.pii[is.na(n.pii$id),"id"] <- paste(n.pii[is.na(n.pii$id),"NUTS0"], "M08.tot", sep=".")
+
+ec.pII$id <- paste(ec.pII$NUTS0, ec.pII$code, sep=".")
+ec.pII[grep("M08", ec.pII$id),]
+
+names(n.pii)[3] <- "our_euro"
+names(ec.pII)[3] <- "ec_euro"
+
+pII.compare <- merge(n.pii[,c(1,5,3)], ec.pII[,c(1,7,3)], all=F)
+
+nrow(pII.compare)
+head(pII.compare)
+
+```
+
+
+```{r pii.plots}
+
+#negative outliers
+(pII.neg <- pII.compare[pII.compare$ec_euro < 0 | pII.compare$our_euro < 0 & !is.na(pII.compare$our_euro),])
+
+(p.pii <- ggplot(pII.compare, aes(x = log(ec_euro+1,10), y = log(our_euro+1,10))) +
+  geom_point(size = 1) +
+  stat_smooth(color = grey(0.5), size = 0.7) +
+  ylab("Our Pillar II (log10 €)") +
+  xlab("EC Pillar II (log10 €)") +
+  geom_abline(slope = 1, intercept = 0) +
+  ylim(0,9) + 
+  xlim(0,9) + 
+  theme_bw())
+
+(p.pii.col <- ggplot(pII.compare, aes(x = log(ec_euro+1,10), y = log(our_euro+1,10), color = NUTS0)) +
+  geom_point(size = 1) +
+  scale_color_discrete() +
+  stat_smooth(color = grey(0.5), size = 0.7) +
+  ylab("Our Pillar II (log10 €)") +
+  xlab("EC Pillar II (log10 €)") +
+  geom_abline(slope = 1, intercept = 0) +
+  ylim(0,9) + 
+  xlim(0,9) + 
+  theme_bw())
+
+(p.pii.ids <- ggplot(pII.compare, aes(x = log(ec_euro+1,10), y = log(our_euro+1,10))) +
+  stat_smooth(color = grey(0.5), size = 0.7) +
+  geom_text(aes(label = id), size = 1) +
+  ylab("Our Pillar II (log10 €)") +
+  xlab("EC Pillar II (log10 €)") +
+  geom_abline(slope = 1, intercept = 0) +
+  ylim(0,9) + 
+  xlim(0,9) + 
+  theme_bw())
+
+write.csv(pII.compare, "PII_country_measures_compare.csv")
+write.csv(pII.neg, "PII_country_measures_compare_negatives.csv")
+
+```
+
+
+#Italy duplicates
+
+```{r italy.duplicates}
+
+it <- read.csv("it_2015.csv", head=T)
+head(it)
+
+names(it)
+
+
+x <- it[,c(3,5)]
+
+duplicated(x)
+which(duplicated(x))
+
+nrow(x)
+length(which(duplicated(x)))
+length(which(duplicated(x$recipient_name)))
+length(which(duplicated(x$amount)))
+
+
+y <- x %>% distinct(recipient_name, amount, .keep_all = TRUE)
+nrow(x) - nrow(y)
+
+sum(x[duplicated(x),2]) / sum(x[,2])
+sum(y[,2])
+
+```
+
+
+
+
+
+```{r print.plots}
+
+pdf("NUTS0_comparison_FINAL.pdf", height=4, width=7)
+p.nuts0
+dev.off()
+
+pdf("NUTS0_comparison_PII_FINAL.pdf", height=4, width=7)
+p.nuts0.pii
+dev.off()
+
+pdf("NUTS2_comparison_FINAL.pdf", height=4, width=8)
+grid.arrange(p.nuts2.tot +
+              geom_text(aes(label = "A", x=4, y=9.5),
+                            size = 6, colour = "black"),
+             p.nuts2.rank +
+              geom_text(aes(label = "B", x=0, y=155),
+                            size = 6, colour = "black"),
+             ncol=2, nrow=1)
+dev.off()
+
+pdf("PII_comparison_FINAL.pdf", height=4, width=4)
+p.pii
+dev.off()
+
+pdf("PII_comparison_FINAL_col.pdf", height=4, width=5.5)
+p.pii.col
+dev.off()
+
+pdf("PII_comparison_FINAL_ids.pdf", height=4, width=4)
+p.pii.ids
+dev.off()
+
+```
+
+
+
+
