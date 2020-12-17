@@ -13,7 +13,7 @@ root
 ├── input
 │   └── [input files go here]
 ├── output
-│   └── [interediary files will appear here]
+│   └── [intermediary files will appear here]
 ├── key [can be downloaded here]
 │   └── nuts
 │       └── [nuts - postcode translation files]
